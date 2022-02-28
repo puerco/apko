@@ -5,6 +5,9 @@ on:
 
 name: Create Release
 
+env:
+  GO_VERSION: 1.17.7
+
 jobs:
   cli:
     name: Release the CLI
@@ -16,9 +19,9 @@ jobs:
       contents: write
 
     steps:
-    - uses: actions/setup-go@f6164bd8c8acb4a71fb2791a8b6c4024ff038dab
+    - uses: actions/setup-go@bfdd3570ce990073878bf10f6b2d79082de49492 #v2.2.0
       with:
-        go-version: 1.17.x
+        go-version: ${{ env.GO_VERSION }}
     - uses: actions/checkout@v2
     - uses: sigstore/cosign-installer@main
     - uses: goreleaser/goreleaser-action@v2
@@ -44,9 +47,9 @@ jobs:
       COSIGN_EXPERIMENTAL: "true"
 
     steps:
-    - uses: actions/setup-go@f6164bd8c8acb4a71fb2791a8b6c4024ff038dab
+    - uses: actions/setup-go@bfdd3570ce990073878bf10f6b2d79082de49492 #v2.2.0
       with:
-        go-version: 1.17.x
+        go-version: ${{ env.GO_VERSION }}
     - uses: imjasonh/setup-ko@v0.4
       with:
         version: v0.10.0

@@ -91,7 +91,8 @@ func buildImageFromLayer(layerTarGZ string, ic types.ImageConfiguration, created
 	cfg.OS = "linux"
 
 	if ic.Entrypoint.Command != "" {
-		cfg.Config.Entrypoint = []string{"/bin/sh", "-c", ic.Entrypoint.Command}
+		//cfg.Config.Entrypoint = []string{"/bin/sh", "-c", ic.Entrypoint.Command}
+		cfg.Config.Cmd = []string{ic.Entrypoint.Command}
 	} else {
 		cfg.Config.Entrypoint = []string{"/bin/sh", "-l"}
 	}

@@ -18,14 +18,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
+	purl "github.com/package-url/packageurl-go"
+	coci "github.com/sigstore/cosign/pkg/oci"
+	khash "sigs.k8s.io/release-utils/hash"
 	"sigs.k8s.io/release-utils/version"
 
-	purl "github.com/package-url/packageurl-go"
-
+	"chainguard.dev/apko/pkg/build/types"
 	"chainguard.dev/apko/pkg/sbom/options"
 )
 
@@ -59,6 +62,22 @@ func stringToIdentifier(in string) (out string) {
 	})
 }
 
+func imagePackageName(opts *options.Options) string {
+	name := "apko-os-layer"
+	if opts.ImageInfo.Reference != "" {
+		x := ""
+		if !strings.Contains(opts.ImageInfo.Reference, "/") {
+			x = "index.docker.io/library/"
+		}
+		name = fmt.Sprintf("%s%s", x, opts.ImageInfo.Reference)
+	}
+	name = name + "@sha256:" + opts.ImageInfo.Digest
+	return name
+}
+func imagePackageID(opts *options.Options) string {
+	return "SPDXRef-Package-" + stringToIdentifier(imagePackageName(opts))
+}
+
 // Generate writes a cyclondx sbom in path
 func (sx *SPDX) Generate(opts *options.Options, path string) error {
 	// The default document name makes no attempt to avoid
@@ -85,14 +104,7 @@ func (sx *SPDX) Generate(opts *options.Options, path string) error {
 		Relationships: []Relationship{},
 	}
 
-	mainPkgName := "apko-os-layer"
-	if opts.ImageInfo.Reference != "" {
-		x := ""
-		if !strings.Contains(opts.ImageInfo.Reference, "/") {
-			x = "index.docker.io/library/"
-		}
-		mainPkgName = fmt.Sprintf("SPDXRef-%s%s", x, opts.ImageInfo.Reference)
-	}
+	mainPkgName := imagePackageName(opts)
 	mainPkgID := stringToIdentifier(mainPkgName)
 
 	// Main package purl
@@ -195,16 +207,103 @@ func (sx *SPDX) Generate(opts *options.Options, path string) error {
 	return nil
 }
 
+func (sx *SPDX) GenerateIndex(
+	opts *options.Options, path string,
+	images map[types.Architecture]coci.SignedImage,
+) (string, error) {
+	documentName := "sbom"
+	//FIXME: Use the index manifest sha
+
+	mainPkgName := "apko-index-layer"
+	if opts.ImageInfo.Reference != "" {
+		x := ""
+		if !strings.Contains(opts.ImageInfo.Reference, "/") {
+			x = "index.docker.io/library/"
+		}
+		mainPkgName = fmt.Sprintf("SPDXRef-%s%s", x, opts.ImageInfo.Reference)
+	}
+	mainPkgID := stringToIdentifier(mainPkgName)
+
+	doc := &Document{
+		ID:      "SPDXRef-DOCUMENT",
+		Name:    documentName,
+		Version: "",
+		CreationInfo: CreationInfo{
+			Created: "1970-01-01T00:00:00Z",
+			Creators: []string{
+				fmt.Sprintf("Tool: apko (%s)", version.GetVersionInfo().GitVersion),
+				"Organization: Chainguard, Inc",
+			},
+			LicenseListVersion: "3.16",
+		},
+		DataLicense:          "CC0-1.0",
+		Namespace:            "https://spdx.org/spdxdocs/apko/",
+		DocumentDescribes:    []string{},
+		Packages:             []Package{},
+		Relationships:        []Relationship{},
+		ExternalDocumentRefs: []ExternalDocumentRef{},
+	}
+
+	// Create the SPDX index manifest package
+	indexPkg := Package{
+		ID:               mainPkgID,
+		Name:             "",
+		Version:          "",
+		FilesAnalyzed:    false,
+		LicenseConcluded: "",
+		LicenseDeclared:  "",
+		Description:      "Multi image index",
+		DownloadLocation: "",
+		Checksums:        []Checksum{},
+		ExternalRefs:     []ExternalRef{},
+	}
+
+	// Cycle all images and read their sboms
+	for arch := range images {
+		// Add their SBOMs to the external document references
+		archSBOM := filepath.Join(opts.WorkDir, fmt.Sprintf("sbom-%s.spdx.json", arch.ToAPK()))
+		checksum, err := khash.SHA256ForFile(archSBOM)
+		if err != nil {
+			return "", fmt.Errorf("hashing %s sbom: %w", arch, err)
+		}
+		eref := ExternalDocumentRef{
+			ID: mainPkgID,
+			Checksum: Checksum{
+				Algorithm: "SHA256",
+				Value:     checksum,
+			},
+			SPDXDocument: "",
+		}
+		doc.ExternalDocumentRefs = append(doc.ExternalDocumentRefs, eref)
+		// FIXME: This is wrong, need to fix param
+		extID := imagePackageID(opts)
+		doc.Relationships = append(doc.Relationships, Relationship{
+			Element: extID,
+			Type:    "VARIANT_OF",
+			Related: mainPkgID,
+		})
+
+		// Add the external image package image as a variant in the index package
+		// GENERATED_FROM DocumentRef-kubernetes-v1.23.1:SPDXRef-Package-kubernetes
+		//SPDXRef-Package-k8s.gcr.io-kube-proxy-arm64-v1.23.1
+		//GENERATED_FROM DocumentRef-kubernetes-v1.23.1:SPDXRef-Package-kubernetes
+		//imageIdentifier()
+	}
+	doc.Packages = append(doc.Packages, indexPkg)
+	return "", nil
+}
+
 type Document struct {
-	ID                string         `json:"SPDXID"`
-	Name              string         `json:"name"`
-	Version           string         `json:"spdxVersion"`
-	CreationInfo      CreationInfo   `json:"creationInfo"`
-	DataLicense       string         `json:"dataLicense"`
-	Namespace         string         `json:"documentNamespace"`
-	DocumentDescribes []string       `json:"documentDescribes"`
-	Packages          []Package      `json:"packages"`
-	Relationships     []Relationship `json:"relationships"`
+	ID                   string                `json:"SPDXID"`
+	Name                 string                `json:"name"`
+	Version              string                `json:"spdxVersion"`
+	CreationInfo         CreationInfo          `json:"creationInfo"`
+	DataLicense          string                `json:"dataLicense"`
+	Namespace            string                `json:"documentNamespace"`
+	DocumentDescribes    []string              `json:"documentDescribes"`
+	Packages             []Package             `json:"packages"`
+	Relationships        []Relationship        `json:"relationships"`
+	ExternalDocumentRefs []ExternalDocumentRef `json:"externalDocumentRefs,omitempty"`
 }
 
 type CreationInfo struct {
@@ -244,4 +343,10 @@ type Relationship struct {
 	Element string `json:"spdxElementId"`
 	Type    string `json:"relationshipType"`
 	Related string `json:"relatedSpdxElement"`
+}
+
+type ExternalDocumentRef struct {
+	ID           string   `json:"externalDocumentId"`
+	Checksum     Checksum `json:"checksum"`
+	SPDXDocument string   `json:"spdxDocument"`
 }

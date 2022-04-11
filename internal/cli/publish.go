@@ -140,6 +140,9 @@ func PublishCmd(ctx context.Context, outputRefs string, archs []types.Architectu
 		var errg errgroup.Group
 		workDir := bc.Options.WorkDir
 		imgs := map[types.Architecture]coci.SignedImage{}
+		sbomData := map[types.Architecture]struct {
+			Checksum string
+		}{}
 
 		for _, arch := range bc.ImageConfiguration.Archs {
 			arch := arch

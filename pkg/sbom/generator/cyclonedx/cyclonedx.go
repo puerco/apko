@@ -21,7 +21,9 @@ import (
 	"strings"
 
 	purl "github.com/package-url/packageurl-go"
+	coci "github.com/sigstore/cosign/pkg/oci"
 
+	"chainguard.dev/apko/pkg/build/types"
 	"chainguard.dev/apko/pkg/sbom/options"
 )
 
@@ -142,6 +144,9 @@ func (cdx *CycloneDX) Generate(opts *options.Options, path string) error {
 	}
 	return nil
 }
+
+// TODO Implement index sbom in cyclonedx
+func (cdx *CycloneDX) GenerateIndex(*options.Options, string, map[types.Architecture]coci.SignedImage) (string, error)
 
 // TODO(kaniini): Move most of this over to gitlab.alpinelinux.org/alpine/go.
 type Document struct {

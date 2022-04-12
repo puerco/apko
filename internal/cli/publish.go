@@ -91,7 +91,7 @@ func PublishCmd(ctx context.Context, outputRefs string, archs []types.Architectu
 	if err != nil {
 		return fmt.Errorf("failed to create working directory: %w", err)
 	}
-	defer os.RemoveAll(wd)
+	//defer os.RemoveAll(wd)
 
 	bc, err := build.New(wd, opts...)
 	if err != nil {
@@ -140,9 +140,12 @@ func PublishCmd(ctx context.Context, outputRefs string, archs []types.Architectu
 		var errg errgroup.Group
 		workDir := bc.Options.WorkDir
 		imgs := map[types.Architecture]coci.SignedImage{}
-		sbomData := map[types.Architecture]struct {
-			Checksum string
-		}{}
+
+		// Lets chat about why we need to have the sbom path
+		// configurable here (i think we don't need this flag)
+		if bc.Options.SBOMPath == "" {
+			bc.Options.SBOMPath = workDir
+		}
 
 		for _, arch := range bc.ImageConfiguration.Archs {
 			arch := arch
@@ -176,6 +179,7 @@ func PublishCmd(ctx context.Context, outputRefs string, archs []types.Architectu
 					}
 				}
 				imgs[arch] = img
+
 				return nil
 			})
 		}
@@ -194,6 +198,44 @@ func PublishCmd(ctx context.Context, outputRefs string, archs []types.Architectu
 			if err != nil {
 				return fmt.Errorf("failed to build OCI index: %w", err)
 			}
+		}
+		// Append sbom
+		// Generate the index SBOM
+		s := sbom.New()
+		if len(bc.Options.Tags) > 0 {
+			tag, err := name.NewTag(bc.Options.Tags[0])
+			if err != nil {
+				return fmt.Errorf("parsing tag %s: %w", bc.Options.Tags[0], err)
+			}
+			s.Options.ImageInfo.Tag = tag.TagStr()
+			s.Options.ImageInfo.Name = tag.String()
+		}
+		s.Options.WorkDir = workDir
+		s.Options.OutputDir = workDir
+		sboms, err := s.GenerateIndexSBOM(digest, imgs, bc.Options.Tags...)
+		if err != nil {
+			return fmt.Errorf("generating index sbom: %w", err)
+		}
+
+		// FIXME: REMOVEME
+		log.Printf("Got %d index sboms", len(sboms))
+
+		for _, bom := range sboms {
+			log.Printf("Dumping %s", bom)
+			data, _ := os.ReadFile(bom)
+			fmt.Println(string(data))
+		}
+		// FIXME: REMOVEME UP TO HERE
+
+		ref, err := name.ParseReference(digest.String())
+		//ref, err := name.ParseReference(bc.Options.Tags[0])
+
+		if err != nil {
+			return fmt.Errorf("parsing index reference: %w", err)
+		}
+
+		if err := oci.AttachIndexSBOM(ref, bc.Options.SBOMPath, bc.Options.SBOMFormats); err != nil {
+			return fmt.Errorf("attaching index sbom: %w", err)
 		}
 	}
 

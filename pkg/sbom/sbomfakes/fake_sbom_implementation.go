@@ -7,6 +7,7 @@ import (
 	"chainguard.dev/apko/pkg/build/types"
 	"chainguard.dev/apko/pkg/sbom/generator"
 	"chainguard.dev/apko/pkg/sbom/options"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/sigstore/cosign/pkg/oci"
 	"gitlab.alpinelinux.org/alpine/go/pkg/repository"
 )
@@ -38,12 +39,14 @@ type FakeSbomImplementation struct {
 		result1 []string
 		result2 error
 	}
-	GenerateIndexStub        func(*options.Options, map[string]generator.Generator, map[types.Architecture]oci.SignedImage) ([]string, error)
+	GenerateIndexStub        func(*options.Options, map[string]generator.Generator, map[types.Architecture]oci.SignedImage, name.Digest, []string) ([]string, error)
 	generateIndexMutex       sync.RWMutex
 	generateIndexArgsForCall []struct {
 		arg1 *options.Options
 		arg2 map[string]generator.Generator
 		arg3 map[types.Architecture]oci.SignedImage
+		arg4 name.Digest
+		arg5 []string
 	}
 	generateIndexReturns struct {
 		result1 []string
@@ -210,20 +213,27 @@ func (fake *FakeSbomImplementation) GenerateReturnsOnCall(i int, result1 []strin
 	}{result1, result2}
 }
 
-func (fake *FakeSbomImplementation) GenerateIndex(arg1 *options.Options, arg2 map[string]generator.Generator, arg3 map[types.Architecture]oci.SignedImage) ([]string, error) {
+func (fake *FakeSbomImplementation) GenerateIndex(arg1 *options.Options, arg2 map[string]generator.Generator, arg3 map[types.Architecture]oci.SignedImage, arg4 name.Digest, arg5 []string) ([]string, error) {
+	var arg5Copy []string
+	if arg5 != nil {
+		arg5Copy = make([]string, len(arg5))
+		copy(arg5Copy, arg5)
+	}
 	fake.generateIndexMutex.Lock()
 	ret, specificReturn := fake.generateIndexReturnsOnCall[len(fake.generateIndexArgsForCall)]
 	fake.generateIndexArgsForCall = append(fake.generateIndexArgsForCall, struct {
 		arg1 *options.Options
 		arg2 map[string]generator.Generator
 		arg3 map[types.Architecture]oci.SignedImage
-	}{arg1, arg2, arg3})
+		arg4 name.Digest
+		arg5 []string
+	}{arg1, arg2, arg3, arg4, arg5Copy})
 	stub := fake.GenerateIndexStub
 	fakeReturns := fake.generateIndexReturns
-	fake.recordInvocation("GenerateIndex", []interface{}{arg1, arg2, arg3})
+	fake.recordInvocation("GenerateIndex", []interface{}{arg1, arg2, arg3, arg4, arg5Copy})
 	fake.generateIndexMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3)
+		return stub(arg1, arg2, arg3, arg4, arg5)
 	}
 	if specificReturn {
 		return ret.result1, ret.result2
@@ -237,17 +247,17 @@ func (fake *FakeSbomImplementation) GenerateIndexCallCount() int {
 	return len(fake.generateIndexArgsForCall)
 }
 
-func (fake *FakeSbomImplementation) GenerateIndexCalls(stub func(*options.Options, map[string]generator.Generator, map[types.Architecture]oci.SignedImage) ([]string, error)) {
+func (fake *FakeSbomImplementation) GenerateIndexCalls(stub func(*options.Options, map[string]generator.Generator, map[types.Architecture]oci.SignedImage, name.Digest, []string) ([]string, error)) {
 	fake.generateIndexMutex.Lock()
 	defer fake.generateIndexMutex.Unlock()
 	fake.GenerateIndexStub = stub
 }
 
-func (fake *FakeSbomImplementation) GenerateIndexArgsForCall(i int) (*options.Options, map[string]generator.Generator, map[types.Architecture]oci.SignedImage) {
+func (fake *FakeSbomImplementation) GenerateIndexArgsForCall(i int) (*options.Options, map[string]generator.Generator, map[types.Architecture]oci.SignedImage, name.Digest, []string) {
 	fake.generateIndexMutex.RLock()
 	defer fake.generateIndexMutex.RUnlock()
 	argsForCall := fake.generateIndexArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
 }
 
 func (fake *FakeSbomImplementation) GenerateIndexReturns(result1 []string, result2 error) {

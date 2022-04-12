@@ -17,6 +17,7 @@ package generator
 //go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
 
 import (
+	"github.com/google/go-containerregistry/pkg/name"
 	coci "github.com/sigstore/cosign/pkg/oci"
 
 	"chainguard.dev/apko/pkg/build/types"
@@ -31,7 +32,7 @@ type Generator interface {
 	Key() string
 	Ext() string
 	Generate(*options.Options, string) error
-	GenerateIndex(*options.Options, string, map[types.Architecture]coci.SignedImage) (string, error)
+	GenerateIndex(*options.Options, string, map[types.Architecture]coci.SignedImage, name.Digest, []string) (string, error)
 }
 
 func Generators() map[string]Generator {

@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	osr "github.com/dominodatalab/os-release"
+	"github.com/google/go-containerregistry/pkg/name"
 	coci "github.com/sigstore/cosign/pkg/oci"
 	"gitlab.alpinelinux.org/alpine/go/pkg/repository"
 
@@ -107,8 +108,10 @@ func (s *SBOM) Generate() ([]string, error) {
 	return files, nil
 }
 
-func (s *SBOM) GenerateIndexSBOM(images map[types.Architecture]coci.SignedImage) ([]string, error) {
-	return s.impl.GenerateIndex(&s.Options, s.Generators, images)
+func (s *SBOM) GenerateIndexSBOM(indexDigest name.Digest, images map[types.Architecture]coci.SignedImage, tags ...string) ([]string, error) {
+	return s.impl.GenerateIndex(
+		&s.Options, s.Generators, images, indexDigest, tags,
+	)
 }
 
 //counterfeiter:generate . sbomImplementation
@@ -117,20 +120,25 @@ type sbomImplementation interface {
 	ReadPackageIndex(*options.Options, string) ([]*repository.Package, error)
 	Generate(*options.Options, map[string]generator.Generator) ([]string, error)
 	CheckGenerators(*options.Options, map[string]generator.Generator) error
-	GenerateIndex(*options.Options, map[string]generator.Generator, map[types.Architecture]coci.SignedImage) ([]string, error)
+	GenerateIndex(
+		*options.Options, map[string]generator.Generator, map[types.Architecture]coci.SignedImage,
+		name.Digest, []string,
+	) ([]string, error)
 }
 
 type defaultSBOMImplementation struct{}
 
 func (di *defaultSBOMImplementation) GenerateIndex(
-	opts *options.Options, generators map[string]generator.Generator, images map[types.Architecture]coci.SignedImage,
+	opts *options.Options, generators map[string]generator.Generator,
+	images map[types.Architecture]coci.SignedImage,
+	indexDigest name.Digest, tags []string,
 ) ([]string, error) {
 	sboms := []string{}
 	for _, format := range opts.Formats {
 		path := filepath.Join(
-			opts.OutputDir, opts.FileName+"."+generators[format].Ext(),
+			opts.OutputDir, "index-sbom."+generators[format].Ext(),
 		)
-		sbom, err := generators[format].GenerateIndex(opts, path, images)
+		sbom, err := generators[format].GenerateIndex(opts, path, images, indexDigest, tags)
 		if err != nil {
 			return nil, fmt.Errorf("gernerting %s index sbom: %w", format, err)
 		}

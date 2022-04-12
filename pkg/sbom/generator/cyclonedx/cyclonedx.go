@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	purl "github.com/package-url/packageurl-go"
 	coci "github.com/sigstore/cosign/pkg/oci"
 
@@ -146,7 +147,9 @@ func (cdx *CycloneDX) Generate(opts *options.Options, path string) error {
 }
 
 // TODO Implement index sbom in cyclonedx
-func (cdx *CycloneDX) GenerateIndex(*options.Options, string, map[types.Architecture]coci.SignedImage) (string, error)
+func (cdx *CycloneDX) GenerateIndex(*options.Options, string, map[types.Architecture]coci.SignedImage, name.Digest, []string) (string, error) {
+	return "", nil
+}
 
 // TODO(kaniini): Move most of this over to gitlab.alpinelinux.org/alpine/go.
 type Document struct {

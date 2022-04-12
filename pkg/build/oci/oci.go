@@ -408,3 +408,48 @@ func humanReadableImageType(mediaType ggcrtypes.MediaType) string {
 	}
 	return "unknown"
 }
+
+func AttachIndexSBOM(ref name.Reference, sbomPath string, sbomFormats []string) error {
+	log.Printf("Attaching sbom to %s", ref.String())
+	si, err := ociremote.SignedImageIndex(ref)
+	if err != nil {
+		return fmt.Errorf("getting signed entity")
+	}
+	// Attach the SBOM, e.g.
+	if len(sbomFormats) > 0 {
+		var mt ggcrtypes.MediaType
+		var path string
+		switch sbomFormats[0] {
+		case "spdx":
+			mt = ctypes.SPDXJSONMediaType
+			path = filepath.Join(sbomPath, "index-sbom.spdx.json")
+		case "cyclonedx":
+			mt = ctypes.CycloneDXJSONMediaType
+			path = filepath.Join(sbomPath, "index-sbom.cdx")
+		default:
+			return fmt.Errorf("unsupported SBOM format: %s", sbomFormats[0])
+		}
+		if len(sbomFormats) > 1 {
+			// When we have multiple formats, warn that we're picking the first.
+			log.Printf("WARNING: multiple SBOM formats requested, uploading SBOM with media type: %s", mt)
+		}
+
+		sbom, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading sbom: %w", err)
+		}
+
+		f, err := static.NewFile(sbom, static.WithLayerMediaType(mt))
+		if err != nil {
+			return err
+		}
+
+		_, err = ocimutate.AttachFileToImageIndex(si, "sbom", f)
+		if err != nil {
+			return fmt.Errorf("attaching sbom to image index: %w", err)
+		}
+
+		log.Printf("Published index sbom to %s", ref.String())
+	}
+	return nil
+}

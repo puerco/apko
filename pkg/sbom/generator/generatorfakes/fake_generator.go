@@ -7,6 +7,7 @@ import (
 	"chainguard.dev/apko/pkg/build/types"
 	"chainguard.dev/apko/pkg/sbom/generator"
 	"chainguard.dev/apko/pkg/sbom/options"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/sigstore/cosign/pkg/oci"
 )
 
@@ -33,12 +34,14 @@ type FakeGenerator struct {
 	generateReturnsOnCall map[int]struct {
 		result1 error
 	}
-	GenerateIndexStub        func(*options.Options, string, map[types.Architecture]oci.SignedImage) (string, error)
+	GenerateIndexStub        func(*options.Options, string, map[types.Architecture]oci.SignedImage, name.Digest, []string) (string, error)
 	generateIndexMutex       sync.RWMutex
 	generateIndexArgsForCall []struct {
 		arg1 *options.Options
 		arg2 string
 		arg3 map[types.Architecture]oci.SignedImage
+		arg4 name.Digest
+		arg5 []string
 	}
 	generateIndexReturns struct {
 		result1 string
@@ -177,20 +180,27 @@ func (fake *FakeGenerator) GenerateReturnsOnCall(i int, result1 error) {
 	}{result1}
 }
 
-func (fake *FakeGenerator) GenerateIndex(arg1 *options.Options, arg2 string, arg3 map[types.Architecture]oci.SignedImage) (string, error) {
+func (fake *FakeGenerator) GenerateIndex(arg1 *options.Options, arg2 string, arg3 map[types.Architecture]oci.SignedImage, arg4 name.Digest, arg5 []string) (string, error) {
+	var arg5Copy []string
+	if arg5 != nil {
+		arg5Copy = make([]string, len(arg5))
+		copy(arg5Copy, arg5)
+	}
 	fake.generateIndexMutex.Lock()
 	ret, specificReturn := fake.generateIndexReturnsOnCall[len(fake.generateIndexArgsForCall)]
 	fake.generateIndexArgsForCall = append(fake.generateIndexArgsForCall, struct {
 		arg1 *options.Options
 		arg2 string
 		arg3 map[types.Architecture]oci.SignedImage
-	}{arg1, arg2, arg3})
+		arg4 name.Digest
+		arg5 []string
+	}{arg1, arg2, arg3, arg4, arg5Copy})
 	stub := fake.GenerateIndexStub
 	fakeReturns := fake.generateIndexReturns
-	fake.recordInvocation("GenerateIndex", []interface{}{arg1, arg2, arg3})
+	fake.recordInvocation("GenerateIndex", []interface{}{arg1, arg2, arg3, arg4, arg5Copy})
 	fake.generateIndexMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3)
+		return stub(arg1, arg2, arg3, arg4, arg5)
 	}
 	if specificReturn {
 		return ret.result1, ret.result2
@@ -204,17 +214,17 @@ func (fake *FakeGenerator) GenerateIndexCallCount() int {
 	return len(fake.generateIndexArgsForCall)
 }
 
-func (fake *FakeGenerator) GenerateIndexCalls(stub func(*options.Options, string, map[types.Architecture]oci.SignedImage) (string, error)) {
+func (fake *FakeGenerator) GenerateIndexCalls(stub func(*options.Options, string, map[types.Architecture]oci.SignedImage, name.Digest, []string) (string, error)) {
 	fake.generateIndexMutex.Lock()
 	defer fake.generateIndexMutex.Unlock()
 	fake.GenerateIndexStub = stub
 }
 
-func (fake *FakeGenerator) GenerateIndexArgsForCall(i int) (*options.Options, string, map[types.Architecture]oci.SignedImage) {
+func (fake *FakeGenerator) GenerateIndexArgsForCall(i int) (*options.Options, string, map[types.Architecture]oci.SignedImage, name.Digest, []string) {
 	fake.generateIndexMutex.RLock()
 	defer fake.generateIndexMutex.RUnlock()
 	argsForCall := fake.generateIndexArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
 }
 
 func (fake *FakeGenerator) GenerateIndexReturns(result1 string, result2 error) {

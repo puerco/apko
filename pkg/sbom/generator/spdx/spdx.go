@@ -23,6 +23,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	purl "github.com/package-url/packageurl-go"
 	coci "github.com/sigstore/cosign/pkg/oci"
 	khash "sigs.k8s.io/release-utils/hash"
@@ -52,6 +53,8 @@ func (sx *SPDX) Ext() string {
 }
 
 func stringToIdentifier(in string) (out string) {
+	in = strings.ReplaceAll(in, "/", "-")
+	in = strings.ReplaceAll(in, "@", "-")
 	return validIDCharsRe.ReplaceAllStringFunc(in, func(s string) string {
 		r := ""
 		for i := 0; i < len(s); i++ {
@@ -62,20 +65,15 @@ func stringToIdentifier(in string) (out string) {
 	})
 }
 
-func imagePackageName(opts *options.Options) string {
-	name := "apko-os-layer"
-	if opts.ImageInfo.Reference != "" {
-		x := ""
-		if !strings.Contains(opts.ImageInfo.Reference, "/") {
-			x = "index.docker.io/library/"
-		}
-		name = fmt.Sprintf("%s%s", x, opts.ImageInfo.Reference)
+func imagePackageName(name, digest string) string {
+	if name == "" {
+		name = "apko-os-layer"
+		// warn about using default
 	}
-	name = name + "@sha256:" + opts.ImageInfo.Digest
-	return name
+	return fmt.Sprintf("%s@%s", name, digest)
 }
-func imagePackageID(opts *options.Options) string {
-	return "SPDXRef-Package-" + stringToIdentifier(imagePackageName(opts))
+func imagePackageID(packageName string) string {
+	return "SPDXRef-Package-" + stringToIdentifier(packageName)
 }
 
 // Generate writes a cyclondx sbom in path
@@ -104,7 +102,7 @@ func (sx *SPDX) Generate(opts *options.Options, path string) error {
 		Relationships: []Relationship{},
 	}
 
-	mainPkgName := imagePackageName(opts)
+	mainPkgName := imagePackageName(opts.ImageInfo.Name, opts.ImageInfo.Digest)
 	mainPkgID := stringToIdentifier(mainPkgName)
 
 	// Main package purl
@@ -210,24 +208,19 @@ func (sx *SPDX) Generate(opts *options.Options, path string) error {
 func (sx *SPDX) GenerateIndex(
 	opts *options.Options, path string,
 	images map[types.Architecture]coci.SignedImage,
+	indexDigest name.Digest, tags []string,
 ) (string, error) {
 	documentName := "sbom"
 	//FIXME: Use the index manifest sha
 
-	mainPkgName := "apko-index-layer"
-	if opts.ImageInfo.Reference != "" {
-		x := ""
-		if !strings.Contains(opts.ImageInfo.Reference, "/") {
-			x = "index.docker.io/library/"
-		}
-		mainPkgName = fmt.Sprintf("SPDXRef-%s%s", x, opts.ImageInfo.Reference)
-	}
+	mainPkgName := indexDigest.String()
 	mainPkgID := stringToIdentifier(mainPkgName)
 
 	doc := &Document{
-		ID:      "SPDXRef-DOCUMENT",
-		Name:    documentName,
-		Version: "",
+		ID:        "SPDXRef-DOCUMENT",
+		Namespace: "https://spdx.org/spdxdocs/apko/",
+		Name:      documentName,
+		Version:   "SPDX-2.2",
 		CreationInfo: CreationInfo{
 			Created: "1970-01-01T00:00:00Z",
 			Creators: []string{
@@ -237,7 +230,6 @@ func (sx *SPDX) GenerateIndex(
 			LicenseListVersion: "3.16",
 		},
 		DataLicense:          "CC0-1.0",
-		Namespace:            "https://spdx.org/spdxdocs/apko/",
 		DocumentDescribes:    []string{},
 		Packages:             []Package{},
 		Relationships:        []Relationship{},
@@ -247,7 +239,7 @@ func (sx *SPDX) GenerateIndex(
 	// Create the SPDX index manifest package
 	indexPkg := Package{
 		ID:               mainPkgID,
-		Name:             "",
+		Name:             mainPkgName,
 		Version:          "",
 		FilesAnalyzed:    false,
 		LicenseConcluded: "",
@@ -259,47 +251,78 @@ func (sx *SPDX) GenerateIndex(
 	}
 
 	// Cycle all images and read their sboms
-	for arch := range images {
+	for arch, img := range images {
 		// Add their SBOMs to the external document references
 		archSBOM := filepath.Join(opts.WorkDir, fmt.Sprintf("sbom-%s.spdx.json", arch.ToAPK()))
 		checksum, err := khash.SHA256ForFile(archSBOM)
 		if err != nil {
 			return "", fmt.Errorf("hashing %s sbom: %w", arch, err)
 		}
+
+		extDocRef := fmt.Sprintf("ExternalDocumentRef:DocumentRef-%s-image", arch)
+		file, err := img.Attachment("sbom")
+		if err != nil {
+			return "", err
+		}
+
+		fileDigest, err := file.Digest()
+		if err != nil {
+			return "", err
+		}
+
+		// Get a reference
+		ref, err := name.ParseReference(opts.ImageInfo.Name + "@" + fileDigest.String())
+		if err != nil {
+			return "", err
+		}
+		dlurl := ref.Context().Registry.RegistryStr() + "/v2/" + ref.Context().RepositoryStr() + "/blobs/" + fileDigest.String()
+		// External reference for the doc
 		eref := ExternalDocumentRef{
-			ID: mainPkgID,
+			ID: extDocRef,
 			Checksum: Checksum{
 				Algorithm: "SHA256",
 				Value:     checksum,
 			},
-			SPDXDocument: "",
+			SPDXDocument: dlurl,
 		}
 		doc.ExternalDocumentRefs = append(doc.ExternalDocumentRefs, eref)
 		// FIXME: This is wrong, need to fix param
-		extID := imagePackageID(opts)
+		imageDigest, err := img.Digest()
+		if err != nil {
+			return "", fmt.Errorf("getting %s image digest: %w", arch, err)
+		}
+
+		extID := extDocRef + ":" + imagePackageID(imagePackageName(opts.ImageInfo.Name, imageDigest.String()))
 		doc.Relationships = append(doc.Relationships, Relationship{
 			Element: extID,
 			Type:    "VARIANT_OF",
 			Related: mainPkgID,
 		})
-
-		// Add the external image package image as a variant in the index package
-		// GENERATED_FROM DocumentRef-kubernetes-v1.23.1:SPDXRef-Package-kubernetes
-		//SPDXRef-Package-k8s.gcr.io-kube-proxy-arm64-v1.23.1
-		//GENERATED_FROM DocumentRef-kubernetes-v1.23.1:SPDXRef-Package-kubernetes
-		//imageIdentifier()
 	}
 	doc.Packages = append(doc.Packages, indexPkg)
-	return "", nil
+	out, err := os.Create(path)
+	if err != nil {
+		return "", fmt.Errorf("opening %s to write index sbom: %w", path, err)
+	}
+	defer out.Close()
+
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+
+	if err := enc.Encode(doc); err != nil {
+		return "", fmt.Errorf("encoding spdx sbom: %w", err)
+	}
+
+	return path, nil
 }
 
 type Document struct {
 	ID                   string                `json:"SPDXID"`
+	Namespace            string                `json:"documentNamespace"`
 	Name                 string                `json:"name"`
 	Version              string                `json:"spdxVersion"`
 	CreationInfo         CreationInfo          `json:"creationInfo"`
 	DataLicense          string                `json:"dataLicense"`
-	Namespace            string                `json:"documentNamespace"`
 	DocumentDescribes    []string              `json:"documentDescribes"`
 	Packages             []Package             `json:"packages"`
 	Relationships        []Relationship        `json:"relationships"`
@@ -321,11 +344,11 @@ type Package struct {
 	LicenseDeclared  string        `json:"licenseDeclared"`
 	Description      string        `json:"description"`
 	DownloadLocation string        `json:"downloadLocation"`
-	Originator       string        `json:"originator"`
-	SourceInfo       string        `json:"sourceInfo"`
-	CopyrightText    string        `json:"copyrightText"`
-	Checksums        []Checksum    `json:"checksums"`
-	ExternalRefs     []ExternalRef `json:"externalRefs"`
+	Originator       string        `json:"originator,omitempty"`
+	SourceInfo       string        `json:"sourceInfo,omitempty"`
+	CopyrightText    string        `json:"copyrightText,omitempty"`
+	Checksums        []Checksum    `json:"checksums,omitempty"`
+	ExternalRefs     []ExternalRef `json:"externalRefs,omitempty"`
 }
 
 type Checksum struct {

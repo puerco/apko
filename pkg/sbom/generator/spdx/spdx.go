@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -26,7 +25,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	purl "github.com/package-url/packageurl-go"
 	coci "github.com/sigstore/cosign/pkg/oci"
-	khash "sigs.k8s.io/release-utils/hash"
 	"sigs.k8s.io/release-utils/version"
 
 	"chainguard.dev/apko/pkg/build/types"
@@ -240,10 +238,10 @@ func (sx *SPDX) GenerateIndex(
 	indexPkg := Package{
 		ID:               mainPkgID,
 		Name:             mainPkgName,
-		Version:          "",
+		Version:          NOASSERTION,
 		FilesAnalyzed:    false,
-		LicenseConcluded: "",
-		LicenseDeclared:  "",
+		LicenseConcluded: NOASSERTION,
+		LicenseDeclared:  NOASSERTION,
 		Description:      "Multi image index",
 		DownloadLocation: "",
 		Checksums:        []Checksum{},
@@ -253,15 +251,11 @@ func (sx *SPDX) GenerateIndex(
 	// Cycle all images and read their sboms
 	for arch, img := range images {
 		// Add their SBOMs to the external document references
-		archSBOM := filepath.Join(opts.WorkDir, fmt.Sprintf("sbom-%s.spdx.json", arch.ToAPK()))
-		checksum, err := khash.SHA256ForFile(archSBOM)
-		if err != nil {
-			return "", fmt.Errorf("hashing %s sbom: %w", arch, err)
-		}
-
 		extDocRef := fmt.Sprintf("ExternalDocumentRef:DocumentRef-%s-image", arch)
+
 		file, err := img.Attachment("sbom")
 		if err != nil {
+			// TODO: Do we *always* have an sbom?
 			return "", err
 		}
 
@@ -275,13 +269,32 @@ func (sx *SPDX) GenerateIndex(
 		if err != nil {
 			return "", err
 		}
-		dlurl := ref.Context().Registry.RegistryStr() + "/v2/" + ref.Context().RepositoryStr() + "/blobs/" + fileDigest.String()
+
+		layers, err := file.Layers()
+		if err != nil {
+			return "", fmt.Errorf("getting layers in sbom file attachment: %w", err)
+		}
+		attachmentDigest, err := layers[0].Digest()
+		if err != nil {
+			return "", fmt.Errorf("getting the sbom layer digest: %w", err)
+		}
+
+		// The download URL of the external document is the blob url
+		// for the first layer of the attachment:
+		dlurl := fmt.Sprintf(
+			"%s://%s/v2/%s/blobs/%s",
+			ref.Context().Registry.Scheme(),
+			ref.Context().Registry.RegistryStr(),
+			ref.Context().RepositoryStr(),
+			attachmentDigest.String(),
+		)
+
 		// External reference for the doc
 		eref := ExternalDocumentRef{
 			ID: extDocRef,
 			Checksum: Checksum{
-				Algorithm: "SHA256",
-				Value:     checksum,
+				Algorithm: strings.ToUpper(attachmentDigest.Algorithm),
+				Value:     attachmentDigest.Hex, //     checksum,
 			},
 			SPDXDocument: dlurl,
 		}

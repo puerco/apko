@@ -199,7 +199,7 @@ func PublishCmd(ctx context.Context, outputRefs string, archs []types.Architectu
 				return fmt.Errorf("failed to build OCI index: %w", err)
 			}
 		}
-		// Append sbom
+
 		// Generate the index SBOM
 		s := sbom.New()
 		if len(bc.Options.Tags) > 0 {
